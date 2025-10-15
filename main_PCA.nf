@@ -1,18 +1,33 @@
 #!/usr/bin/env nextflow
+// LASER_PCA_AncestryInference — main pipeline (user-facing template)
 
-nextflow.enable.dsl=2
+nextflow.enable.dsl = 2
 
 /*
- * Author: Justin Pelletier (inspired by Peyton McClelland script)
+ * Author: Justin Pelletier (inspired by Peyton McClelland)
  * Year: 2025
- * Pipeline: LASER PCA Projection with QC 
+ * Pipeline: LASER PCA Projection with QC
+ *
+ * REQUIREMENTS
+ * - Input VCFs are bgzipped + tabix-indexed, one per chromosome named "chrN.vcf.gz" (+ .tbi)
+ * - Sample include-lists are text files (one ID per line) that match VCF sample names
+ * - `params.lowcomplexity_bed` is hg38; set `params.header_bed` to "TRUE" or "FALSE"
+ * - LASER directory contains `laser`, `trace`, and `vcf2geno` binaries (see `params.path_to_laser`)
+ * - `bin/PCA.R` exists (Nextflow adds `bin/` to PATH automatically)
+ *
+ * NOTES
+ * - This script uses generic `module load` examples; remove or adapt to your env/containers.
  */
 
-params.nPCs      = 20
-params.min_prob  = 0
-params.seed      = 11
+// ---- User-tunable defaults (can be overridden on CLI) -----------------------
+params.nPCs     = params.nPCs     ?: 20
+params.min_prob = params.min_prob ?: 0
+params.seed     = params.seed     ?: 11
+params.outdir   = params.outdir   ?: "results/LASER_PCA"
 
-
+// ----------------------------------------------------------------------------
+// 1) Normalize & QC: Reference
+// ----------------------------------------------------------------------------
 process qc_norm_ref {
     tag "$chr"
     input:
@@ -21,16 +36,22 @@ process qc_norm_ref {
         tuple val(chr), path("ref_${chr}.qc.vcf.gz"), path("ref_${chr}.qc.vcf.gz.tbi")
     script:
     """
+    # Adapt/remove module lines if using containers or a local toolchain
     module load bcftools
+
     bcftools norm -m -both -f "${params.ref_fasta}" "$vcf" | \
       bcftools view -f PASS -q 0.05 -Q 0.95 | \
       bcftools annotate -x INFO,^GT | \
       bcftools view -S "${params.qc_ref_list}" --force-samples | \
       bcftools annotate --set-id '%CHROM:%POS:%REF:%ALT' -Oz -o ref_${chr}.qc.vcf.gz
+
     tabix -f ref_${chr}.qc.vcf.gz
     """
 }
 
+// ----------------------------------------------------------------------------
+// 2) Normalize & QC: Study
+// ----------------------------------------------------------------------------
 process qc_norm_study {
     tag "$chr"
     input:
@@ -40,15 +61,20 @@ process qc_norm_study {
     script:
     """
     module load bcftools
+
     bcftools norm -m -both -f "${params.ref_fasta}" "$vcf" | \
       bcftools view -q 0.05 -Q 0.95 | \
       bcftools annotate -x INFO,^GT | \
       bcftools view -S "${params.qc_study_list}" --force-samples | \
       bcftools annotate --set-id '%CHROM:%POS:%REF:%ALT' -Oz -o study_${chr}.qc.vcf.gz
+
     tabix -f study_${chr}.qc.vcf.gz
     """
 }
 
+// ----------------------------------------------------------------------------
+// 3) Intersect shared variants (reference ∩ study)
+// ----------------------------------------------------------------------------
 process intersect {
   tag "$chr"
   input:
@@ -69,32 +95,30 @@ process intersect {
   """
 }
 
-
-
+// ----------------------------------------------------------------------------
+// 4) Final QC + LD pruning (PLINK), then convert back to VCF
+// ----------------------------------------------------------------------------
 process final_qc_and_prune {
   tag "$chr"
   input:
     tuple val(chr), path(vcf), path(vcf_tbi)
-
   output:
     tuple val(chr), path("${chr}.pruned.vcf.gz"), path("${chr}.pruned.vcf.gz.tbi")
-
   script:
   """
-  module load StdEnv/2020 plink/1.9b_6.21-x86_64 bcftools
+  module load plink/1.9 bcftools
 
-  # ─── prepare low complexity bed ────
-  # if header_bed==TRUE, drop the first line, then keep only cols 1-3.
+  # Prepare low-complexity BED (drop header if present; keep first 3 cols)
   if [ "${params.header_bed}" = "TRUE" ]; then
     tail -n +2 ${params.lowcomplexity_bed} | cut -f1-3 > lowcomplexity.clean.bed
   else
     cut -f1-3 ${params.lowcomplexity_bed} > lowcomplexity.clean.bed
   fi
 
-  # ─── Pre-filter with bcftools to exclude regions ───
+  # Exclude low-complexity/MHC regions
   bcftools view -T ^lowcomplexity.clean.bed "$vcf" -Oz -o ${chr}.filtered.vcf.gz
 
-  # ─── Run PLINK on the filtered VCF ───
+  # PLINK QC
   plink --vcf ${chr}.filtered.vcf.gz \
         --double-id \
         --real-ref-alleles \
@@ -105,8 +129,7 @@ process final_qc_and_prune {
         --make-bed \
         --out ${chr}.final_qc
 
-
-  # ─── LD pruning ────
+  # LD pruning
   plink --bfile ${chr}.final_qc \
         --indep-pairwise 200 50 0.2 \
         --out ${chr}.prune
@@ -116,7 +139,7 @@ process final_qc_and_prune {
         --make-bed \
         --out ${chr}.pruned
 
-  # ─── back to VCF ────
+  # Convert back to VCF
   plink --bfile ${chr}.pruned \
         --recode vcf bgz \
         --out ${chr}.pruned
@@ -125,22 +148,25 @@ process final_qc_and_prune {
   """
 }
 
-
-
+// ----------------------------------------------------------------------------
+// 5) Concatenate per-chromosome pruned VCFs
+// ----------------------------------------------------------------------------
 process concat_pruned_vcfs {
-    input: path vcf_files
-    output: path("allchr.pruned.vcf.gz")
+    input:
+      path vcf_files
+    output:
+      path("allchr.pruned.vcf.gz")
     script:
     """
     module load bcftools
     bcftools concat -Oz -o allchr.pruned.vcf.gz ${vcf_files.join(' ')}
+    tabix -f allchr.pruned.vcf.gz
     """
 }
 
-//////////////////////////////
-// 1) Double up the sample‐ID lists
-//////////////////////////////
-
+// ----------------------------------------------------------------------------
+// 6) Double the sample IDs (FID IID) for PLINK/LASER conventions
+// ----------------------------------------------------------------------------
 process double_ref_ids {
   input:
     path qc_ref_list
@@ -163,12 +189,9 @@ process double_study_ids {
   """
 }
 
-
-
-//////////////////////////////
-// 2) Split the doubled study list into 1 000‐line chunks
-//////////////////////////////
-
+// ----------------------------------------------------------------------------
+// 7) Split the doubled study list into chunks (default: 1000 per batch)
+// ----------------------------------------------------------------------------
 process split_study_list {
   input:
     path study_list
@@ -180,11 +203,9 @@ process split_study_list {
   """
 }
 
-
-//////////////////////////////
-// 3) Prepare & PCA the *reference* ONCE
-//////////////////////////////
-
+// ----------------------------------------------------------------------------
+// 8) Prepare reference LASER inputs + compute reference PCA (once)
+// ----------------------------------------------------------------------------
 process prepare_reference {
   tag "prepare_reference"
   input:
@@ -196,19 +217,19 @@ process prepare_reference {
     path "reference_pruned.geno"
     path "reference_pruned.site"
     path "reference.RefPC.coord"
-  publishDir "results/LASER_PCA", mode: "copy"
+  publishDir "${params.outdir}", mode: "copy"
   script:
   """
-  module load StdEnv/2020 gcc/9.3.0 bcftools
+  module load bcftools
 
-  # 1) extract only reference samples
+  # Extract only reference samples
   bcftools view -S ${ref_list} --force-samples -Oz -o reference_pruned.vcf.gz ${vcf}
   tabix -f reference_pruned.vcf.gz
 
-  # 2) convert to geno/site
+  # Convert to LASER geno/site
   ${params.path_to_laser}/vcf2geno/vcf2geno --inVcf reference_pruned.vcf.gz --out reference_pruned
 
-  # 3) run PCA on reference
+  # Run PCA on reference
   ${params.path_to_laser}/laser \
     -g reference_pruned.geno \
     -k ${params.nPCs} \
@@ -217,40 +238,33 @@ process prepare_reference {
   """
 }
 
-
-//////////////////////////////
-// 4) Project each 1000‐sample batch in parallel
-//////////////////////////////
-
+// ----------------------------------------------------------------------------
+// 9) Project each N-sample batch onto the reference PCs (parallel)
+// ----------------------------------------------------------------------------
 process laser_pca_projection_batch {
-  publishDir "results/LASER_PCA/batches", mode: "copy"
-
+  publishDir "${params.outdir}/batches", mode: "copy"
   input:
-   tuple path(batch_file),
+    tuple path(batch_file),
           path(vcf),
           path(ref_geno),
           path(ref_site),
           path(ref_pca)
-  
   output:
     path "trace_*.ProPC.coord"
-
   script:
   """
   module load bcftools
 
   batch_id=\$(basename ${batch_file} .id)
 
-  # extract just this batch
-  bcftools view -S ${batch_file} --force-samples -Oz \
-    -o study_\${batch_id}.vcf.gz ${vcf}
+  # Extract this batch
+  bcftools view -S ${batch_file} --force-samples -Oz -o study_\${batch_id}.vcf.gz ${vcf}
   tabix -f study_\${batch_id}.vcf.gz
 
-  # convert to geno/site
-  ${params.path_to_laser}/vcf2geno/vcf2geno --inVcf study_\${batch_id}.vcf.gz \
-                                          --out study_\${batch_id}
+  # Convert to LASER geno/site
+  ${params.path_to_laser}/vcf2geno/vcf2geno --inVcf study_\${batch_id}.vcf.gz --out study_\${batch_id}
 
-  # project onto reference PCs
+  # LASER trace config for projection
   cat <<EOF > trace_\${batch_id}.conf
 STUDY_FILE    study_\${batch_id}.geno
 GENO_FILE     ${ref_geno}
@@ -265,63 +279,45 @@ EOF
   """
 }
 
-
-
-//////////////////////////////
-// 5) Finally, merge all batches with the reference PCA
-//////////////////////////////
-
+// ----------------------------------------------------------------------------
+// 10) Merge all batches with the reference PCA
+//     (writes a trimmed coord file + a full concat)
+// ----------------------------------------------------------------------------
 process merge_proj_coords {
   input:
     path ref_pca
     path proj_files
   output:
     path "final.ProPC.coord"
-  publishDir "results/LASER_PCA", mode: "copy"
+  publishDir "${params.outdir}", mode: "copy"
   script:
   """
-  # ─── 1) Clean reference PCA and write to trimmed output ───
+  # 1) Start with cleaned reference PCA (keep IDs + PC columns)
   awk 'NR==1 { print; next }
        {
          # Clean FID and IID: ref1_ref1 → ref1
-         for (i=1; i<=2; i++) {
-           split(\$i, parts, "_");
-           \$i = parts[1];
-         }
-         # Print all fields with tab separation
+         for (i=1; i<=2; i++) { split(\$i, parts, "_"); \$i = parts[1]; }
          printf "%s\\t%s", \$1, \$2;
          for (i=3; i<=NF; i++) printf "\\t%s", \$i;
          printf "\\n";
        }' ${ref_pca} > final.ProPC.coord
 
-  # ─── 2) Append cleaned batch projections to trimmed output ───
+  # 2) Append cleaned batch projections (keep IDs + PC columns)
   for f in ${proj_files.join(' ')}; do
     tail -n +2 \$f | awk '{
       # Clean FID and IID: sample1_sample1_sample1_sample1 → sample1_sample1
-      for (i=1; i<=2; i++) {
-        split(\$i, parts, "_");
-        \$i = parts[1] "_" parts[2];
-      }
-      # Keep only popID, indivID, and PCs (drop L, K, t, Z)
+      for (i=1; i<=2; i++) { split(\$i, parts, "_"); \$i = parts[1] "_" parts[2]; }
       printf "%s\\t%s", \$1, \$2;
-      for (i=7; i<=NF; i++) printf "\\t%s", \$i;
+      for (i=7; i<=NF; i++) printf "\\t%s", \$i;  # PCs start at col 7 in LASER outputs
       printf "\\n";
     }' >> final.ProPC.coord
   done
 
-  # ─── 3) Merge batch projections only (full version) ───
-  # Write header from first file
+  # Optional: also produce a full merged file of all projected batches
   head -n 1 ${proj_files[0]} > final.ProPC.full.coord
-
-  # Append cleaned rows from all batch files
   for f in ${proj_files.join(' ')}; do
     tail -n +2 \$f | awk '{
-      # Clean FID and IID: sample1_sample1_sample1_sample1 → sample1_sample1
-      for (i=1; i<=2; i++) {
-        split(\$i, parts, "_");
-        \$i = parts[1] "_" parts[2];
-      }
-      # Print all fields with tab separation
+      for (i=1; i<=2; i++) { split(\$i, parts, "_"); \$i = parts[1] "_" parts[2]; }
       printf "%s\\t%s", \$1, \$2;
       for (i=3; i<=NF; i++) printf "\\t%s", \$i;
       printf "\\n";
@@ -330,133 +326,90 @@ process merge_proj_coords {
   """
 }
 
-
-
+// ----------------------------------------------------------------------------
+// 11) Plot PCA using repo's bin/PCA.R (no absolute paths)
+// ----------------------------------------------------------------------------
 process run_pca_analysis {
   tag "run_pca_analysis"
-
   input:
     path pca_file
   output:
     path "*"
   publishDir "results/PCA_plots", mode: "copy"
-
   script:
   """
-  module load r/4.5.0
-
+  module load r
   mkdir -p plot_PCA
-  Rscript /lustre07/scratch/justinp/Imputation_PAPER/FINAL_2025/PCA/parallel_PCA_nf/bin/PCA.R ${pca_file} ${params.meta_file} ${params.qc_study_list} ${params.k} ${params.n_pcs} ${params.threshold_N}
+
+  # Because PCA.R is in bin/, Nextflow puts it on PATH; call it directly
+  Rscript PCA.R ${pca_file} ${params.meta_file} ${params.qc_study_list} ${params.k} ${params.n_pcs} ${params.threshold_N}
   """
 }
 
-
-
-
+// ============================================================================
+// WORKFLOW
+// ============================================================================
 workflow {
 
-    lowcomplexity_bed_ch = Channel.fromPath(params.lowcomplexity_bed)
-
-     ref_ch = Channel.fromPath(params.input_reference, checkIfExists:true)
-                    .map { f ->
-                        def match = (f.name =~ /chr(\d+)/)
-                        if (match) {
-                            def chr = match[0][1] as Integer
-                            if (chr >= 1 && chr <= 22)
-                                tuple(chr.toString(), f, file(f.toString() + '.tbi'))
-                        }
-                    }
-                    .filter { it != null }
-
-    study_ch = Channel.fromPath(params.input_study, checkIfExists:true)
-                      .map { f ->
-                          def match = (f.name =~ /chr(\d+)/)
-                          if (match) {
-                              def chr = match[0][1] as Integer
-                              if (chr >= 1 && chr <= 22)
-                                  tuple(chr.toString(), f, file(f.toString() + '.tbi'))
+    // Build per-chromosome tuples for autosomes 1..22 from input globs
+    def ref_ch = Channel.fromPath(params.input_reference, checkIfExists: true)
+                        .map { f ->
+                          def m = (f.name =~ /chr(\d+)/)
+                          if (m) {
+                            def c = m[0][1] as Integer
+                            if (c >= 1 && c <= 22) tuple(c.toString(), f, file(f.toString() + '.tbi'))
                           }
-                      }
-                      .filter { it != null }
+                        }
+                        .filter { it != null }
 
+    def study_ch = Channel.fromPath(params.input_study, checkIfExists: true)
+                          .map { f ->
+                            def m = (f.name =~ /chr(\d+)/)
+                            if (m) {
+                              def c = m[0][1] as Integer
+                              if (c >= 1 && c <= 22) tuple(c.toString(), f, file(f.toString() + '.tbi'))
+                            }
+                          }
+                          .filter { it != null }
 
-    //ref_ch.view { "REF → $it" }
-    //study_ch.view { "STUDY → $it" }
+    // Parameter files as channels
+    def qc_ref_list_ch   = Channel.fromPath(params.qc_ref_list)
+    def qc_study_list_ch = Channel.fromPath(params.qc_study_list)
 
-    // turn those two params into channels
-    qc_ref_list_ch   = Channel.fromPath(params.qc_ref_list)
-    qc_study_list_ch = Channel.fromPath(params.qc_study_list)
+    // Normalize/QC both panels
+    def ref_qc   = qc_norm_ref(ref_ch)
+    def study_qc = qc_norm_study(study_ch)
 
-    // Normalization, QC and filtering
-    ref_qc   = qc_norm_ref(ref_ch)
-    study_qc = qc_norm_study(study_ch)
+    // Join by chr → intersect → QC+prune
+    def ref_study_joined = ref_qc.join(study_qc)
+    def intersect_results = intersect(ref_study_joined)
+    def pruned_all = final_qc_and_prune(intersect_results)
 
-    // Join outputs by chr
-    ref_study_joined = ref_qc.join(study_qc)
+    // Concatenate all pruned VCFs (collect into a list of paths)
+    def concat_results = concat_pruned_vcfs( pruned_all.map { it[1] }.collect() )
 
-    // Intersect shared variants
-    intersect_results = intersect(ref_study_joined)
+    // Double ID lists + split study list into batches
+    def ref_ids   = double_ref_ids(qc_ref_list_ch)
+    def study_ids = double_study_ids(qc_study_list_ch)
+    def study_batches = split_study_list(study_ids).flatMap { it }
 
-    // Final QC + LD pruning
-    pruned_all = final_qc_and_prune(intersect_results)
+    // Prepare reference (VCF → geno/site → PCA)
+    def ( ref_vcf, ref_tbi, ref_geno, ref_site, ref_pca ) = prepare_reference(concat_results, ref_ids)
 
-    //
-    // 1) concatenate all the per-chr pruned VCFs
-    //
-    concat_results = concat_pruned_vcfs(
-      pruned_all.map { it[1] }.collect()
-    )
+    // Build combined input tuples for projection (batch × reference)
+    def proj_input = study_batches
+                      .combine(concat_results)
+                      .combine(ref_geno)
+                      .combine(ref_site)
+                      .combine(ref_pca)
+                      .map { it -> tuple(it[0], it[1], it[2], it[3], it[4]) }
 
-    //concat_results.view { "CONCAT VCF → $it" }
+    // Project each batch in parallel
+    def projected = laser_pca_projection_batch(proj_input)
 
-    //
-    // 2) build the doubled ID lists
-    //
-    ref_ids   = double_ref_ids(qc_ref_list_ch)
-    study_ids = double_study_ids(qc_study_list_ch)
+    // Merge all projections with the reference PCs
+    def final_pca = merge_proj_coords(ref_pca, projected.collect())
 
-
-    //
-    // 3) prepare the reference PCA once (emit: ref_vcf, ref_tbi, ref_geno, ref_site, ref_pca)
-    //
-    ( ref_vcf, ref_tbi, ref_geno, ref_site, ref_pca ) =  prepare_reference(concat_results, ref_ids)
-
-    ref_geno.view { "REF GENO → $it" }
-    ref_site.view { "REF SITE → $it" }
-    ref_pca.view { "REF PCA → $it" }
-
-
-    //
-    // 4) split the study IDs into 1 000-sample chunks
-    //
-    study_batches = split_study_list(study_ids)
-      .flatMap { it }    
-    study_batches.view { "STUDY_BATCHES → $it" }
-
-
-    // 5) project each batch in parallel, feeding all five channels
-    proj_input = study_batches
-      .combine(concat_results)
-      .combine(ref_geno)
-      .combine(ref_site)
-      .combine(ref_pca)
-      .map { it -> tuple(it[0], it[1], it[2], it[3], it[4]) }
-
-
-    proj_input.view { "PROJ_INPUT → ${it[0].name}" }
-
-    projected = laser_pca_projection_batch(proj_input)
-
-    projected.collect().view { "MERGE INPUT FILES → $it" }
-
-
-    // 7) finally stitch them back together
-    //final_pca = merge_proj_coords(ref_pca, projected)
-    final_pca = merge_proj_coords(ref_pca, projected.collect())
-
-
-
-    // 8 Generates the plots
-    pca_plots = run_pca_analysis(final_pca)
+    // Generate plots
+    run_pca_analysis(final_pca)
 }
-
