@@ -80,7 +80,7 @@ All input paths are defined in `nextflow.config`.
 | `params.input_study` | Glob for per-chromosome **study VCFs** (`chr*.vcf.gz` + `.tbi`) |
 | `params.qc_ref_list` | List of reference sample IDs (one per line) |
 | `params.qc_study_list` | List of study sample IDs (one per line) |
-| `params.lowcomplexity_bed` | BED file listing low-complexity regions and MHC to exclude (available in the bin directory)|
+| `params.lowcomplexity_bed` | BED file listing low-complexity regions and MHC to exclude (available in the `bin` directory)|
 | `params.header_bed` | `"TRUE"` if the BED has a header line |
 | `params.meta_file` | Metadata table with sample and population info for plotting |
 | `params.ref_fasta` | hg38 reference FASTA (used for normalization) |
