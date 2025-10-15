@@ -11,7 +11,7 @@
 module load nextflow
 
 
-nextflow run main.nf -c nextflow.config -resume
+nextflow run main_PCA.nf -c nextflow.config -resume
 
 
 echo "DONE"
