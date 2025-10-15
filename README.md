@@ -82,7 +82,7 @@ All input paths are defined in `nextflow.config`.
 | `params.qc_study_list` | List of study sample IDs (one per line) |
 | `params.lowcomplexity_bed` | BED file listing low-complexity regions and MHC to exclude (available in the `bin` directory)|
 | `params.header_bed` | `"TRUE"` if the BED has a header line |
-| `params.meta_file` | Metadata table `.tsv` with sample (1st column) and population info for plotting (2nd column) |
+| `params.meta_file` | Metadata table `.tsv` with sample (1st column) and population info for plotting (2nd column), including a header |
 | `params.ref_fasta` | hg38 reference FASTA (used for normalization) |
 | `params.path_to_laser` | Path to directory containing LASER binaries (`laser`, `vcf2geno`) |
 
