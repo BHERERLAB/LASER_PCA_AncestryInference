@@ -153,7 +153,7 @@ module load r/4.5.0
 
 **A. Digital Alliance (SLURM)**
 
-# Edit scripts/launch_da.sh with your account/time/mem/CPUs
+Edit scripts/launch_da.sh with your account/time/mem/CPUs
 ```bash
 bash scripts/launch_da.sh
 ```
