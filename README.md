@@ -136,7 +136,7 @@ Intermediate files are cached in `work/` and can be re-used with `-resume`.
 - **R ≥ 4.2** with packages required by `bin/PCA.R`
 
 ### On Digital Alliance / Compute Canada
-Load modules within your job script (`scripts/launch_da.sh`), for example:
+Load modules within your job script (`launch_da.sh`), for example:
 ```bash
 module load nextflow
 module load bcftools
@@ -153,9 +153,9 @@ module load r/4.5.0
 
 **A. Digital Alliance (SLURM)**
 
-Edit scripts/launch_da.sh with your account/time/mem/CPUs
+Edit launch_da.sh with your account/time/mem/CPUs
 ```bash
-bash scripts/launch_da.sh
+bash launch_da.sh
 ```
 
 This will automatically create logs/ and reports/ directories and run:
