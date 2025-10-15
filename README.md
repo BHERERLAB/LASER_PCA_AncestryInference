@@ -155,7 +155,7 @@ module load r/4.5.0
 
 Edit launch_da.sh with your account/time/mem/CPUs
 ```bash
-bash launch_da.sh
+sbatch launch_da.sh
 ```
 
 
