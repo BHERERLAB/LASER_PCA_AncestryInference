@@ -38,16 +38,17 @@ The pipeline performs the following key steps:
 ## 📂 Repository structure
 
 LASER_PCA_AncestryInference/
-├── main.nf # Main Nextflow pipeline
-├── nextflow.config # Global configuration file
-├── bin/
-│ └── PCA.R # R script for PCA visualization
-├── scripts/
-│ └── launch_da.sh # SLURM launcher for Digital Alliance
-├── conf/ # (Optional) future config profiles
-├── README.md
-├── .gitignore
-└── LICENSE
+|-- main.nf                  # Main Nextflow pipeline
+|-- nextflow.config          # Global configuration file
+|-- bin/
+|   `-- PCA.R                # R script for PCA visualization
+|-- scripts/
+|   `-- launch_da.sh         # SLURM launcher for Digital Alliance
+|-- conf/                    # (Optional) future config profiles
+|-- README.md
+|-- .gitignore
+`-- LICENSE
+
 
 > The `bin/` directory is automatically added to the `$PATH` by Nextflow, so scripts inside it (like `PCA.R`) can be called directly within processes.
 
