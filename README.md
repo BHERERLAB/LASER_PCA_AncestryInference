@@ -32,6 +32,7 @@ The pipeline performs the following key steps:
 6. **Merging and visualization**
    - Concatenate all projected batches into a unified `final.ProPC.coord`.
    - Plot the reference + projected samples using the `bin/PCA.R` script.
+   - Perform KNN ancestry inference and outputs the study groups in `results/PCA_plots/plot_PCA`
 
 ---
 
