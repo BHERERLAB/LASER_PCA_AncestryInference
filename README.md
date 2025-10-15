@@ -45,10 +45,7 @@ LASER_PCA_AncestryInference/
 |---- PCA.R                # R script for PCA visualization
 |---- genome_gap_hg38_and_MHC_<nochr>.bed                # BED file for low complexity regions + MHC region (with or without chr prefix to match your data)
 |-- launch_da.sh         # SLURM launcher for Digital Alliance
-|-- conf/                    # (Optional) future config profiles
 |-- README.md
-|-- .gitignore
-`-- LICENSE
 ```
 
 
