@@ -52,6 +52,21 @@ LASER_PCA_AncestryInference/
 > The `bin/` directory is automatically added to the `$PATH` by Nextflow, so scripts inside it (like `PCA.R`) can be called directly within processes.
 
 
+---
+
+##   🧬 LASER installation
+
+This pipeline requires LASER v2.04 or newer, which must be downloaded and installed manually.
+LASER provides the core PCA projection and reference coordinate utilities (laser, trace, and vcf2geno).
+
+**Download & installation instructions:**
+➡️ https://csg.sph.umich.edu/chaolong/LASER/
+
+After installation, make sure the directory containing these binaries is accessible and specify it in your config file as:
+```bash
+path_to_laser = "/path/to/LASER-2.04"
+```
+
 
 ---
 
