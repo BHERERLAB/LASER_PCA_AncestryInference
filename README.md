@@ -158,12 +158,6 @@ Edit launch_da.sh with your account/time/mem/CPUs
 bash launch_da.sh
 ```
 
-This will automatically create logs/ and reports/ directories and run:
-```bash
-nextflow run . -c nextflow.config -resume \
-  -with-report reports/<timestamp>_report.html \
-  -with-timeline reports/<timestamp>_timeline.html
-```
 
 **B. Direct invocation (local or HPC shell)**
 ```bash
@@ -175,10 +169,6 @@ nextflow run . \
   --ref_fasta /path/to/hg38.fa \
   -with-report reports/run_report.html \
   -with-timeline reports/timeline.html
-```
-**C. Quick smoke test**
-```bash
-nextflow run . -stub-run -profile test
 ```
 
 
