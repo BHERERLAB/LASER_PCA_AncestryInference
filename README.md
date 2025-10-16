@@ -3,6 +3,8 @@
 **LASER_PCA_AncestryInference** is a modular [Nextflow DSL2](https://www.nextflow.io/) pipeline that performs **ancestry inference via principal component analysis (PCA)** using the [LASER software](https://genome.sph.umich.edu/wiki/LASER).  
 It automates all steps required to project study samples onto a reference panel (HGDP + 1000 Genomes) while ensuring consistency across chromosomes and batches.
 
+Inspired by Peyton McClelland pipeline: [HGDP_1KG_ancestry_inference](https://github.com/CERC-Genomic-Medicine/HGDP_1KG_ancestry_inference)
+
 ---
 
 ## 🧬 Pipeline overview
